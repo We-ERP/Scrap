@@ -5,7 +5,7 @@ import pandas as pd
 import time
 import requests
 
-# رابط الـ Web App الخاص بك
+# رابط الـ Web App الجديد (تأكد من وضع الرابط الجديد لو عملت New Deployment)
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
 
 print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي الشامل...")
@@ -13,21 +13,17 @@ options = Options()
 options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
-
-# 🌟 السطور السحرية لحل مشكلة الشيت الفاضي (إجبار السيرفر على وضع الكمبيوتر وتفادي الحظر)
 options.add_argument("--window-size=1920,1080") 
 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-
 options.add_argument("--lang=ar-EG")
-driver = webdriver.Chrome(options=options)
 
+driver = webdriver.Chrome(options=options)
 all_scraped_data = []
 
 try:
-    # --- الخطوة 1: الدخول للصفحة الرئيسية وسحب جميع الأقسام ديناميكياً ---
     print("🏠 جاري فتح الصفحة الرئيسية للاستكشاف وسحب الأقسام...")
     driver.get("https://www.rayashop.com/ar/")
-    time.sleep(8) # زيادة وقت الانتظار للتأكد من تحميل القائمة بالكامل على السيرفر
+    time.sleep(8) 
     
     category_elements = driver.find_elements(By.CSS_SELECTOR, "ul.CategoryList li a")
     categories_map = {}
@@ -40,7 +36,6 @@ try:
 
     print(f"🎯 تم استكشاف {len(categories_map)} قسم رئيسي بنجاح.")
 
-    # --- الخطوة 2: تجميع روابط جميع المنتجات من كل الصفحات أولاً ---
     product_tasks = []
     
     for cat_url, cat_name in categories_map.items():
@@ -54,15 +49,19 @@ try:
             driver.get(page_url)
             time.sleep(5)
             
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-            time.sleep(1)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            # عمل سكرول متدرج لضمان تحميل كل الكروت (Lazy Loading Fix)
+            for _ in range(3):
+                driver.execute_script("window.scrollBy(0, 800);")
+                time.sleep(2)
             
             cards = driver.find_elements(By.TAG_NAME, "article")
             if not cards:
-                print(f"   ⏹️ لا توجد صفحات روابط أخرى في هذا القسم.")
-                break
+                # محاولة أخيرة لو الصفحة أخدت وقت أطول
+                time.sleep(4)
+                cards = driver.find_elements(By.TAG_NAME, "article")
+                if not cards:
+                    print(f"   ⏹️ لا توجد صفحات روابط أخرى في هذا القسم.")
+                    break
                 
             new_links_found = 0
             for card in cards:
@@ -85,17 +84,29 @@ try:
 
     print(f"\n🔥 إجمالي الروابط التي تم جمعها للموقع بالكامل: {len(product_tasks)} منتج.")
 
-    # --- الخطوة 3: الدخول لصفحة كل منتج وسحب البيانات العميقة بالملي ---
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         driver.get(p_url)
         time.sleep(4)
         
         try:
+            # معالجة وفصل اسم المنتج وكود المنتج
             try:
-                product_name = driver.find_element(By.TAG_NAME, "h1").text.strip()
+                full_product_name = driver.find_element(By.TAG_NAME, "h1").text.strip()
+                if " - " in full_product_name:
+                    name_parts = full_product_name.rsplit(" - ", 1)
+                    product_name = name_parts[0].strip()
+                    product_code = name_parts[1].strip()
+                elif "-" in full_product_name:
+                    name_parts = full_product_name.rsplit("-", 1)
+                    product_name = name_parts[0].strip()
+                    product_code = name_parts[1].strip()
+                else:
+                    product_name = full_product_name
+                    product_code = "N/A"
             except:
                 product_name = "N/A"
+                product_code = "N/A"
                 
             try:
                 brand_element = driver.find_element(By.CSS_SELECTOR, "a[href*='/ar/brands/']")
@@ -128,12 +139,14 @@ try:
             except:
                 pass
 
+            # ترتيب العواميد كما طلبت بالظبط
             product_data = {
-                "تصنيف المنتج": product_category,
-                "اسم براند المنتج": brand_name,
+                "كاتيجوري": product_category,
                 "اسم المنتج": product_name,
-                "السعر بالظبط": exact_price,
-                "رابط المنتج": p_url
+                "كود المنتج": product_code,
+                "اسم البراند": brand_name,
+                "سعر المنتج": exact_price,
+                "لينك المنتج": p_url
             }
             
             for img_idx, img_url in enumerate(image_urls, 1):
@@ -144,20 +157,21 @@ try:
         except Exception:
             continue
 
-    # --- الخطوة 4: إرسال البيانات أوتوماتيكياً لجوجل شيت ---
     if all_scraped_data:
         df = pd.DataFrame(all_scraped_data)
         print("🌐 جاري نقل البيانات أوتوماتيكياً إلى Google Sheet عبر الـ Web App...")
         
+        # الترتيب التلقائي من البانداس هيضمن إن لو منتج فيه صور كتير، كل العواميد هتتظبط
         cleaned_data = df.fillna("").to_dict(orient="records")
         payload = {"products": cleaned_data}
         
         try:
-            response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=120)
-            if response.status_code == 200:
+            # تم رفع الـ Timeout لضمان استقرار الاتصال مع حجم الداتا الكبير
+            response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=180)
+            if response.status_code in [200, 302]:
                 print("✅ تم تحديث شيت جوجل السحابي بنجاح مذهل!")
             else:
-                print(f"⚠️ الـ Web App رد بكود مختلف: {response.status_code}")
+                print(f"⚠️ الـ Web App رد بكود مختلف: {response.status_code} - رسالة السيرفر: {response.text}")
         except Exception as http_err:
             print(f"❌ حدث خطأ أثناء الاتصال بجوجل شيت: {http_err}")
     else:
