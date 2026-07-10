@@ -8,12 +8,17 @@ import requests
 # رابط الـ Web App الخاص بك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
 
-print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي (Headless) على سيرفر جيت هب...")
+print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي الشامل...")
 options = Options()
-options.add_argument("--headless=new") # تشغيل خفي بدون واجهة رسومية
+options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--lang=ar-EG") # تثبيت اللغة العربية
+
+# 🌟 السطور السحرية لحل مشكلة الشيت الفاضي (إجبار السيرفر على وضع الكمبيوتر وتفادي الحظر)
+options.add_argument("--window-size=1920,1080") 
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
+options.add_argument("--lang=ar-EG")
 driver = webdriver.Chrome(options=options)
 
 all_scraped_data = []
@@ -22,7 +27,7 @@ try:
     # --- الخطوة 1: الدخول للصفحة الرئيسية وسحب جميع الأقسام ديناميكياً ---
     print("🏠 جاري فتح الصفحة الرئيسية للاستكشاف وسحب الأقسام...")
     driver.get("https://www.rayashop.com/ar/")
-    time.sleep(6)
+    time.sleep(8) # زيادة وقت الانتظار للتأكد من تحميل القائمة بالكامل على السيرفر
     
     category_elements = driver.find_elements(By.CSS_SELECTOR, "ul.CategoryList li a")
     categories_map = {}
@@ -47,12 +52,12 @@ try:
             page_url = f"{cat_url}?p={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
             driver.get(page_url)
-            time.sleep(4)
+            time.sleep(5)
             
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
             time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1.5)
+            time.sleep(2)
             
             cards = driver.find_elements(By.TAG_NAME, "article")
             if not cards:
@@ -84,7 +89,7 @@ try:
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         driver.get(p_url)
-        time.sleep(3.5)
+        time.sleep(4)
         
         try:
             try:
@@ -148,7 +153,7 @@ try:
         payload = {"products": cleaned_data}
         
         try:
-            response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=90)
+            response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=120)
             if response.status_code == 200:
                 print("✅ تم تحديث شيت جوجل السحابي بنجاح مذهل!")
             else:
@@ -156,7 +161,7 @@ try:
         except Exception as http_err:
             print(f"❌ حدث خطأ أثناء الاتصال بجوجل شيت: {http_err}")
     else:
-        print("\n❌ لم يتم تجميع بيانات.")
+        print("\n❌ لم يتم تجميع بيانات، يرجى مراجعة حجم الشاشة الكلي وعناصر الصفحة.")
 
 except Exception as main_error:
     print(f"❌ حدث خطأ عام: {main_error}")
