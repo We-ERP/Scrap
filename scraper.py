@@ -5,7 +5,7 @@ import pandas as pd
 import time
 import requests
 
-# رابط الـ Web App الجديد (تأكد من وضع الرابط الجديد لو عملت New Deployment)
+# رابط الـ Web App بتاعك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
 
 print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي الشامل...")
@@ -18,6 +18,9 @@ options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Apple
 options.add_argument("--lang=ar-EG")
 
 driver = webdriver.Chrome(options=options)
+# وضع حد أقصى لتحميل أي صفحة (30 ثانية) عشان السكريبت ميهنجش ويقفل
+driver.set_page_load_timeout(30)
+
 all_scraped_data = []
 
 try:
@@ -46,8 +49,12 @@ try:
         while True:
             page_url = f"{cat_url}?p={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
-            driver.get(page_url)
-            time.sleep(5)
+            try:
+                driver.get(page_url)
+                time.sleep(5)
+            except Exception:
+                print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
+                break # لو صفحة الأقسام تقيلة نخرج وندخل عالقسم اللي بعده
             
             # عمل سكرول متدرج لضمان تحميل كل الكروت (Lazy Loading Fix)
             for _ in range(3):
@@ -56,7 +63,6 @@ try:
             
             cards = driver.find_elements(By.TAG_NAME, "article")
             if not cards:
-                # محاولة أخيرة لو الصفحة أخدت وقت أطول
                 time.sleep(4)
                 cards = driver.find_elements(By.TAG_NAME, "article")
                 if not cards:
@@ -86,11 +92,16 @@ try:
 
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
-        driver.get(p_url)
-        time.sleep(4)
+        
+        # حماية هنا عشان لو صفحة منتج علقت، السكريبت يكمل وميقفلش
+        try:
+            driver.get(p_url)
+            time.sleep(3)
+        except Exception as e:
+            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء التحميل: {p_url}")
+            continue # كمل على المنتج اللي بعده وماتوقفش السكريبت
         
         try:
-            # معالجة وفصل اسم المنتج وكود المنتج
             try:
                 full_product_name = driver.find_element(By.TAG_NAME, "h1").text.strip()
                 if " - " in full_product_name:
@@ -139,7 +150,6 @@ try:
             except:
                 pass
 
-            # ترتيب العواميد كما طلبت بالظبط
             product_data = {
                 "كاتيجوري": product_category,
                 "اسم المنتج": product_name,
@@ -157,16 +167,15 @@ try:
         except Exception:
             continue
 
+    # --- الخطوة 4: إرسال البيانات لجوجل شيت (دي اللي مكنش بيوصلها) ---
     if all_scraped_data:
         df = pd.DataFrame(all_scraped_data)
         print("🌐 جاري نقل البيانات أوتوماتيكياً إلى Google Sheet عبر الـ Web App...")
         
-        # الترتيب التلقائي من البانداس هيضمن إن لو منتج فيه صور كتير، كل العواميد هتتظبط
         cleaned_data = df.fillna("").to_dict(orient="records")
         payload = {"products": cleaned_data}
         
         try:
-            # تم رفع الـ Timeout لضمان استقرار الاتصال مع حجم الداتا الكبير
             response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=180)
             if response.status_code in [200, 302]:
                 print("✅ تم تحديث شيت جوجل السحابي بنجاح مذهل!")
