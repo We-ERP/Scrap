@@ -47,41 +47,57 @@ try:
         seen_urls_in_category = set()
         
         while True:
-            page_url = f"{cat_url}?p={page_num}"
+            # التصحيح 1: استخدام page بدلاً من p للترقيم السليم 
+            sep = "&" if "?" in cat_url else "?"
+            page_url = f"{cat_url}{sep}page={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
+            
             try:
                 driver.get(page_url)
-                time.sleep(5)
+                time.sleep(6) # وقت إضافي لضمان تحميل الصفحة
             except Exception:
                 print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
-                break # لو صفحة الأقسام تقيلة نخرج وندخل عالقسم اللي بعده
+                break 
             
-            # عمل سكرول متدرج لضمان تحميل كل الكروت (Lazy Loading Fix)
-            for _ in range(3):
-                driver.execute_script("window.scrollBy(0, 800);")
-                time.sleep(2)
+            # التصحيح 2: سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية في الـ Lazy Load
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            for _ in range(15): # محاولة النزول التدريجي المريح للموقع
+                driver.execute_script("window.scrollBy(0, 700);")
+                time.sleep(1.5)
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    time.sleep(2) # فرصة أخيرة قبل ما يحكم إنها خلصت
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height:
+                        break
+                last_height = new_height
             
             cards = driver.find_elements(By.TAG_NAME, "article")
             if not cards:
                 time.sleep(4)
                 cards = driver.find_elements(By.TAG_NAME, "article")
                 if not cards:
-                    print(f"   ⏹️ لا توجد صفحات روابط أخرى في هذا القسم.")
+                    print(f"   ⏹️ لا توجد كروت روابط أخرى في هذا القسم.")
                     break
                 
             new_links_found = 0
             for card in cards:
                 try:
-                    link_elem = card.find_element(By.TAG_NAME, "a")
-                    p_link = link_elem.get_attribute("href")
-                    if p_link and p_link not in seen_urls_in_category:
-                        seen_urls_in_category.add(p_link)
-                        product_tasks.append((p_link, cat_name))
-                        new_links_found += 1
+                    # التصحيح 3: اصطياد الرابط السليم بعناية من داخل الكارت
+                    a_tags = card.find_elements(By.TAG_NAME, "a")
+                    for a in a_tags:
+                        p_link = a.get_attribute("href")
+                        if p_link and "rayashop.com" in p_link and p_link not in seen_urls_in_category:
+                            seen_urls_in_category.add(p_link)
+                            product_tasks.append((p_link, cat_name))
+                            new_links_found += 1
+                            break # لقينا رابط المنتج، انقل ع الكارت اللي بعده فورا
                 except:
                     continue
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
+            
+            # لو ملقاش روابط جديدة، ده معناه إننا وصلنا لنهاية الترقيم الفعلي للقسم
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
@@ -90,16 +106,16 @@ try:
 
     print(f"\n🔥 إجمالي الروابط التي تم جمعها للموقع بالكامل: {len(product_tasks)} منتج.")
 
+    # --- الخطوة 3: الدخول لصفحة كل منتج وسحب البيانات ---
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         
-        # حماية هنا عشان لو صفحة منتج علقت، السكريبت يكمل وميقفلش
         try:
             driver.get(p_url)
             time.sleep(3)
         except Exception as e:
             print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء التحميل: {p_url}")
-            continue # كمل على المنتج اللي بعده وماتوقفش السكريبت
+            continue 
         
         try:
             try:
@@ -167,7 +183,7 @@ try:
         except Exception:
             continue
 
-    # --- الخطوة 4: إرسال البيانات لجوجل شيت (دي اللي مكنش بيوصلها) ---
+    # --- الخطوة 4: إرسال البيانات لجوجل شيت ---
     if all_scraped_data:
         df = pd.DataFrame(all_scraped_data)
         print("🌐 جاري نقل البيانات أوتوماتيكياً إلى Google Sheet عبر الـ Web App...")
