@@ -47,56 +47,55 @@ try:
         seen_urls_in_category = set()
         
         while True:
-            # التعديل الجذري هنا: رجعنا لـ p= بدل page= لأن ده اللي موقع راية بيفهمه وبيقلب بيه
+            # استخدام page= هو الصحيح بنسبة 100% لموقع راية
             sep = "&" if "?" in cat_url else "?"
-            page_url = f"{cat_url}{sep}p={page_num}"
+            page_url = f"{cat_url}{sep}page={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
             
             try:
                 driver.get(page_url)
-                time.sleep(6) # وقت إضافي لضمان تحميل الصفحة
             except Exception:
                 print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
                 break 
             
-            # سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            for _ in range(15): 
-                driver.execute_script("window.scrollBy(0, 700);")
-                time.sleep(1.5)
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    time.sleep(2) 
+            new_links_found = 0
+            retries = 3 # عدد محاولات انتظار تحميل الداتا الجديدة من السيرفر
+            
+            while retries > 0 and new_links_found == 0:
+                # سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية
+                last_height = driver.execute_script("return document.body.scrollHeight")
+                for _ in range(10): 
+                    driver.execute_script("window.scrollBy(0, 800);")
+                    time.sleep(1.5)
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     if new_height == last_height:
                         break
-                last_height = new_height
-            
-            cards = driver.find_elements(By.TAG_NAME, "article")
-            if not cards:
-                time.sleep(4)
-                cards = driver.find_elements(By.TAG_NAME, "article")
-                if not cards:
-                    print(f"   ⏹️ لا توجد كروت روابط أخرى في هذا القسم.")
-                    break
+                    last_height = new_height
                 
-            new_links_found = 0
-            for card in cards:
-                try:
-                    a_tags = card.find_elements(By.TAG_NAME, "a")
-                    for a in a_tags:
+                # استهداف الروابط اللي جوة شبكة المنتجات بشكل محدد عشان نتجنب أي لينكات تانية
+                a_tags = driver.find_elements(By.CSS_SELECTOR, ".ProductsGrid a, article a, .CategoryPage__products a")
+                
+                for a in a_tags:
+                    try:
                         p_link = a.get_attribute("href")
-                        if p_link and "rayashop.com" in p_link and p_link not in seen_urls_in_category:
-                            seen_urls_in_category.add(p_link)
-                            product_tasks.append((p_link, cat_name))
-                            new_links_found += 1
-                            break # لقينا الرابط، انقل ع الكارت اللي بعده
-                except:
-                    continue
+                        # فلترة سريعة عشان نضمن إن ده رابط منتج فعلاً
+                        if p_link and "rayashop.com" in p_link and "/ar/" in p_link and "?" not in p_link:
+                            if p_link not in seen_urls_in_category:
+                                seen_urls_in_category.add(p_link)
+                                product_tasks.append((p_link, cat_name))
+                                new_links_found += 1
+                    except:
+                        continue
+                
+                # لو ملقاش روابط جديدة، هيستنى الموقع يحملها ويحاول تاني بدل ما يقفل فوراً
+                if new_links_found == 0:
+                    print(f"   ⏳ الموقع لسه بيحمل الداتا الجديدة، جاري الانتظار والمحاولة مرة أخرى...")
+                    time.sleep(4)
+                    retries -= 1
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
             
-            # لو ملقاش روابط جديدة، معناه وصلنا لنهاية الترقيم الفعلي
+            # لو بعد كل المحاولات ملقاش، يبقى كده الكاتيجوري خلصت فعلياً
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
