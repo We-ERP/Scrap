@@ -47,9 +47,9 @@ try:
         seen_urls_in_category = set()
         
         while True:
-            # التصحيح 1: استخدام page بدلاً من p للترقيم السليم 
+            # التعديل الجذري هنا: رجعنا لـ p= بدل page= لأن ده اللي موقع راية بيفهمه وبيقلب بيه
             sep = "&" if "?" in cat_url else "?"
-            page_url = f"{cat_url}{sep}page={page_num}"
+            page_url = f"{cat_url}{sep}p={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
             
             try:
@@ -59,14 +59,14 @@ try:
                 print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
                 break 
             
-            # التصحيح 2: سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية في الـ Lazy Load
+            # سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية
             last_height = driver.execute_script("return document.body.scrollHeight")
-            for _ in range(15): # محاولة النزول التدريجي المريح للموقع
+            for _ in range(15): 
                 driver.execute_script("window.scrollBy(0, 700);")
                 time.sleep(1.5)
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
-                    time.sleep(2) # فرصة أخيرة قبل ما يحكم إنها خلصت
+                    time.sleep(2) 
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     if new_height == last_height:
                         break
@@ -83,7 +83,6 @@ try:
             new_links_found = 0
             for card in cards:
                 try:
-                    # التصحيح 3: اصطياد الرابط السليم بعناية من داخل الكارت
                     a_tags = card.find_elements(By.TAG_NAME, "a")
                     for a in a_tags:
                         p_link = a.get_attribute("href")
@@ -91,13 +90,13 @@ try:
                             seen_urls_in_category.add(p_link)
                             product_tasks.append((p_link, cat_name))
                             new_links_found += 1
-                            break # لقينا رابط المنتج، انقل ع الكارت اللي بعده فورا
+                            break # لقينا الرابط، انقل ع الكارت اللي بعده
                 except:
                     continue
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
             
-            # لو ملقاش روابط جديدة، ده معناه إننا وصلنا لنهاية الترقيم الفعلي للقسم
+            # لو ملقاش روابط جديدة، معناه وصلنا لنهاية الترقيم الفعلي
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
