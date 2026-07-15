@@ -18,8 +18,7 @@ options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Apple
 options.add_argument("--lang=ar-EG")
 
 driver = webdriver.Chrome(options=options)
-# وضع حد أقصى لتحميل أي صفحة (30 ثانية) عشان السكريبت ميهنجش ويقفل
-driver.set_page_load_timeout(30)
+driver.set_page_load_timeout(45) # زودنا الوقت عشان الصفحات التقيلة
 
 all_scraped_data = []
 
@@ -28,6 +27,7 @@ try:
     driver.get("https://www.rayashop.com/ar/")
     time.sleep(8) 
     
+    # تجميع روابط الأقسام
     category_elements = driver.find_elements(By.CSS_SELECTOR, "ul.CategoryList li a")
     categories_map = {}
     
@@ -35,7 +35,9 @@ try:
         href = elem.get_attribute("href")
         name = elem.text.strip()
         if href and name and "/ar/" in href:
-            categories_map[href] = name
+            # تنظيف الرابط الأساسي
+            clean_href = href.split('?')[0]
+            categories_map[clean_href] = name
 
     print(f"🎯 تم استكشاف {len(categories_map)} قسم رئيسي بنجاح.")
 
@@ -47,55 +49,68 @@ try:
         seen_urls_in_category = set()
         
         while True:
-            # استخدام page= هو الصحيح بنسبة 100% لموقع راية
-            sep = "&" if "?" in cat_url else "?"
-            page_url = f"{cat_url}{sep}page={page_num}"
+            # استخدام page= للترقيم
+            page_url = f"{cat_url}?page={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
             
             try:
                 driver.get(page_url)
+                time.sleep(5) # انتظار التحميل الأولي
             except Exception:
                 print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
                 break 
             
-            new_links_found = 0
-            retries = 3 # عدد محاولات انتظار تحميل الداتا الجديدة من السيرفر
+            # --- تطبيق اقتراحك: سكرول بطيء وكامل لنهاية الصفحة ---
+            print("   ⬇️ جاري النزول لآخر الصفحة لضمان ظهور كافة المنتجات...")
+            last_height = driver.execute_script("return document.body.scrollHeight")
             
-            while retries > 0 and new_links_found == 0:
-                # سكرول متدرج قوي جداً لضمان ظهور كل الكروت المخفية
-                last_height = driver.execute_script("return document.body.scrollHeight")
-                for _ in range(10): 
-                    driver.execute_script("window.scrollBy(0, 800);")
-                    time.sleep(1.5)
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break
-                    last_height = new_height
+            while True:
+                # النزول بمقدار 500 بيكسل في المرة عشان الكروت تلحق تـ Render
+                driver.execute_script("window.scrollBy(0, 500);")
+                time.sleep(1.2)
                 
-                # استهداف الروابط اللي جوة شبكة المنتجات بشكل محدد عشان نتجنب أي لينكات تانية
-                a_tags = driver.find_elements(By.CSS_SELECTOR, ".ProductsGrid a, article a, .CategoryPage__products a")
+                # حساب الارتفاع الجديد
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                current_scroll_position = driver.execute_script("return window.innerHeight + window.scrollY")
                 
-                for a in a_tags:
-                    try:
-                        p_link = a.get_attribute("href")
-                        # فلترة سريعة عشان نضمن إن ده رابط منتج فعلاً
-                        if p_link and "rayashop.com" in p_link and "/ar/" in p_link and "?" not in p_link:
-                            if p_link not in seen_urls_in_category:
-                                seen_urls_in_category.add(p_link)
-                                product_tasks.append((p_link, cat_name))
-                                new_links_found += 1
-                    except:
+                # لو وصلنا لنهاية الصفحة الفعيلة
+                if current_scroll_position >= new_height - 100:
+                    time.sleep(3) # ننتظر ثواني أخيرة تحسباً لأي تحميل متأخر
+                    final_height_check = driver.execute_script("return document.body.scrollHeight")
+                    if final_height_check == new_height:
+                        break # وصلنا للنهاية الحقيقية
+                        
+                last_height = new_height
+            
+            # --- استخراج الروابط باستخدام الجافاسكريبت لضمان الدقة والسرعة ---
+            links = driver.execute_script("""
+                var urls = [];
+                var items = document.querySelectorAll('article a, .ProductsGrid a, a[href*="/ar/"]');
+                for (var i = 0; i < items.length; i++) {
+                    urls.push(items[i].href);
+                }
+                return urls;
+            """)
+            
+            new_links_found = 0
+            for p_link in links:
+                if p_link and "rayashop.com" in p_link and "/ar/" in p_link:
+                    # استبعاد الروابط اللي مش منتجات
+                    exclude_keywords = ["/brands/", "/categories/", "/cart", "/login", "/contact", "/about"]
+                    if any(kw in p_link for kw in exclude_keywords):
                         continue
-                
-                # لو ملقاش روابط جديدة، هيستنى الموقع يحملها ويحاول تاني بدل ما يقفل فوراً
-                if new_links_found == 0:
-                    print(f"   ⏳ الموقع لسه بيحمل الداتا الجديدة، جاري الانتظار والمحاولة مرة أخرى...")
-                    time.sleep(4)
-                    retries -= 1
+                        
+                    # تنظيف الرابط من أي متغيرات عشان نمنع التكرار
+                    clean_p_link = p_link.split('?')[0]
+                    
+                    if clean_p_link not in seen_urls_in_category:
+                        seen_urls_in_category.add(clean_p_link)
+                        product_tasks.append((clean_p_link, cat_name))
+                        new_links_found += 1
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
             
-            # لو بعد كل المحاولات ملقاش، يبقى كده الكاتيجوري خلصت فعلياً
+            # لو ملحقناش أي روابط جديدة، يبقى القسم ده خلص تماماً
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
@@ -105,6 +120,7 @@ try:
     print(f"\n🔥 إجمالي الروابط التي تم جمعها للموقع بالكامل: {len(product_tasks)} منتج.")
 
     # --- الخطوة 3: الدخول لصفحة كل منتج وسحب البيانات ---
+    # (لم يتم تغيير أي شيء في اللوجيك الداخلي لبيانات المنتج كما طلبت)
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         
@@ -112,7 +128,7 @@ try:
             driver.get(p_url)
             time.sleep(3)
         except Exception as e:
-            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء التحميل: {p_url}")
+            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء التحميل.")
             continue 
         
         try:
@@ -184,7 +200,7 @@ try:
     # --- الخطوة 4: إرسال البيانات لجوجل شيت ---
     if all_scraped_data:
         df = pd.DataFrame(all_scraped_data)
-        print("🌐 جاري نقل البيانات أوتوماتيكياً إلى Google Sheet عبر الـ Web App...")
+        print("\n🌐 جاري نقل البيانات أوتوماتيكياً إلى Google Sheet عبر الـ Web App...")
         
         cleaned_data = df.fillna("").to_dict(orient="records")
         payload = {"products": cleaned_data}
