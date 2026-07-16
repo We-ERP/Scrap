@@ -4,6 +4,7 @@ from selenium.webdriver.common.by import By
 import pandas as pd
 import time
 import requests
+from selenium.common.exceptions import TimeoutException # استيراد مكتبة الأخطاء للتعامل مع الـ Timeout
 
 # رابط الـ Web App بتاعك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
@@ -17,15 +18,21 @@ options.add_argument("--window-size=1920,1080")
 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 options.add_argument("--lang=ar-EG")
 
+# تعديل استراتيجية التحميل لتجنب التعليق على الصور والملفات التقيلة
+options.page_load_strategy = 'eager' 
+
 driver = webdriver.Chrome(options=options)
-driver.set_page_load_timeout(45) # زودنا الوقت عشان الصفحات التقيلة
+driver.set_page_load_timeout(45) # وقت الانتظار الأقصى لفتح الصفحة
 
 all_scraped_data = []
 
 try:
     print("🏠 جاري فتح الصفحة الرئيسية للاستكشاف وسحب الأقسام...")
-    driver.get("https://www.rayashop.com/ar/")
-    time.sleep(8) 
+    try:
+        driver.get("https://www.rayashop.com/ar/")
+        time.sleep(8) 
+    except TimeoutException:
+        print("⚠️ الصفحة الرئيسية أخذت وقتاً طويلاً للتحميل، سنحاول الاستمرار...")
     
     # تجميع روابط الأقسام
     category_elements = driver.find_elements(By.CSS_SELECTOR, "ul.CategoryList li a")
@@ -56,31 +63,37 @@ try:
             try:
                 driver.get(page_url)
                 time.sleep(5) # انتظار التحميل الأولي
-            except Exception:
-                print("   ⚠️ الصفحة دي تقيلة جداً، هنتخطاها...")
+            except TimeoutException:
+                print(f"   ⚠️ انتهى وقت الانتظار (Timeout) لصفحة الروابط رقم ({page_num}). سنتخطاها...")
+                break
+            except Exception as e:
+                print(f"   ⚠️ حدث خطأ أثناء فتح الصفحة: {e}، هنتخطاها...")
                 break 
             
             # --- تطبيق اقتراحك: سكرول بطيء وكامل لنهاية الصفحة ---
             print("   ⬇️ جاري النزول لآخر الصفحة لضمان ظهور كافة المنتجات...")
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            
-            while True:
-                # النزول بمقدار 500 بيكسل في المرة عشان الكروت تلحق تـ Render
-                driver.execute_script("window.scrollBy(0, 500);")
-                time.sleep(1.2)
+            try:
+                last_height = driver.execute_script("return document.body.scrollHeight")
                 
-                # حساب الارتفاع الجديد
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                current_scroll_position = driver.execute_script("return window.innerHeight + window.scrollY")
-                
-                # لو وصلنا لنهاية الصفحة الفعيلة
-                if current_scroll_position >= new_height - 100:
-                    time.sleep(3) # ننتظر ثواني أخيرة تحسباً لأي تحميل متأخر
-                    final_height_check = driver.execute_script("return document.body.scrollHeight")
-                    if final_height_check == new_height:
-                        break # وصلنا للنهاية الحقيقية
-                        
-                last_height = new_height
+                while True:
+                    # النزول بمقدار 500 بيكسل في المرة عشان الكروت تلحق تـ Render
+                    driver.execute_script("window.scrollBy(0, 500);")
+                    time.sleep(1.2)
+                    
+                    # حساب الارتفاع الجديد
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    current_scroll_position = driver.execute_script("return window.innerHeight + window.scrollY")
+                    
+                    # لو وصلنا لنهاية الصفحة الفعيلة
+                    if current_scroll_position >= new_height - 100:
+                        time.sleep(3) # ننتظر ثواني أخيرة تحسباً لأي تحميل متأخر
+                        final_height_check = driver.execute_script("return document.body.scrollHeight")
+                        if final_height_check == new_height:
+                            break # وصلنا للنهاية الحقيقية
+                            
+                    last_height = new_height
+            except Exception as scroll_err:
+                print(f"   ⚠️ مشكلة أثناء النزول في الصفحة (Scroll): {scroll_err}")
             
             # --- استخراج الروابط باستخدام الجافاسكريبت لضمان الدقة والسرعة ---
             links = driver.execute_script("""
@@ -120,15 +133,17 @@ try:
     print(f"\n🔥 إجمالي الروابط التي تم جمعها للموقع بالكامل: {len(product_tasks)} منتج.")
 
     # --- الخطوة 3: الدخول لصفحة كل منتج وسحب البيانات ---
-    # (لم يتم تغيير أي شيء في اللوجيك الداخلي لبيانات المنتج كما طلبت)
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         
         try:
             driver.get(p_url)
             time.sleep(3)
+        except TimeoutException:
+            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء شديد في التحميل (Timeout).")
+            continue 
         except Exception as e:
-            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء التحميل.")
+            print(f"   ⚠️ تجاوزنا المنتج ده بسبب خطأ غير متوقع.")
             continue 
         
         try:
