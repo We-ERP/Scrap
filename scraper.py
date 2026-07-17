@@ -4,7 +4,7 @@ from selenium.webdriver.common.by import By
 import pandas as pd
 import time
 import requests
-from selenium.common.exceptions import TimeoutException # استيراد مكتبة الأخطاء للتعامل مع الـ Timeout
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # رابط الـ Web App بتاعك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
@@ -18,11 +18,14 @@ options.add_argument("--window-size=1920,1080")
 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 options.add_argument("--lang=ar-EG")
 
-# تعديل استراتيجية التحميل لتجنب التعليق على الصور والملفات التقيلة
+# استراتيجية eager لتسريع استجابة الهيكل وعزل بطء الميديا
 options.page_load_strategy = 'eager' 
 
 driver = webdriver.Chrome(options=options)
-driver.set_page_load_timeout(45) # وقت الانتظار الأقصى لفتح الصفحة
+
+# زيادة وقت الانتظار الإضافي لفتح الصفحات والسكربتات لـ 120 ثانية منعاً لأي تعليق لقدرات السيرفر
+driver.set_page_load_timeout(120) 
+driver.set_script_timeout(120)
 
 all_scraped_data = []
 
@@ -31,7 +34,7 @@ try:
     try:
         driver.get("https://www.rayashop.com/ar/")
         time.sleep(8) 
-    except TimeoutException:
+    except (TimeoutException, WebDriverException):
         print("⚠️ الصفحة الرئيسية أخذت وقتاً طويلاً للتحميل، سنحاول الاستمرار...")
     
     # تجميع روابط الأقسام
@@ -63,57 +66,61 @@ try:
             try:
                 driver.get(page_url)
                 time.sleep(5) # انتظار التحميل الأولي
-            except TimeoutException:
-                print(f"   ⚠️ انتهى وقت الانتظار (Timeout) لصفحة الروابط رقم ({page_num}). سنتخطاها...")
-                break
+            except (TimeoutException, WebDriverException):
+                print(f"   ⚠️ انتهى وقت الانتظار (Timeout) أثناء فتح صفحة الروابط رقم ({page_num}). سنحاول سحب المتاح حالياً...")
+                # لا نخرج بـ break مباشرة، بل نترك الفرصة لمحاولة قراءة الروابط الموجودة بالفعل في الـ DOM
             except Exception as e:
-                print(f"   ⚠️ حدث خطأ أثناء فتح الصفحة: {e}، هنتخطاها...")
+                print(f"   ⚠️ حدث خطأ غير متوقع أثناء فتح الصفحة: {e}")
                 break 
             
-            # --- تطبيق اقتراحك: سكرول بطيء وكامل لنهاية الصفحة ---
+            # --- حماية وعزل عملية السكرول تماماً لتجنب انهيار الـ Renderer ---
             print("   ⬇️ جاري النزول لآخر الصفحة لضمان ظهور كافة المنتجات...")
             try:
                 last_height = driver.execute_script("return document.body.scrollHeight")
+                scroll_attempts = 0
+                max_scroll_attempts = 30 # حد أقصى للسكرول لمنع تهنيج المتصفح في الصفحات اللانهائية
                 
-                while True:
-                    # النزول بمقدار 500 بيكسل في المرة عشان الكروت تلحق تـ Render
-                    driver.execute_script("window.scrollBy(0, 500);")
-                    time.sleep(1.2)
+                while scroll_attempts < max_scroll_attempts:
+                    driver.execute_script("window.scrollBy(0, 600);")
+                    time.sleep(1.5)
                     
-                    # حساب الارتفاع الجديد
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     current_scroll_position = driver.execute_script("return window.innerHeight + window.scrollY")
                     
-                    # لو وصلنا لنهاية الصفحة الفعيلة
-                    if current_scroll_position >= new_height - 100:
-                        time.sleep(3) # ننتظر ثواني أخيرة تحسباً لأي تحميل متأخر
+                    if current_scroll_position >= new_height - 150:
+                        time.sleep(3)
                         final_height_check = driver.execute_script("return document.body.scrollHeight")
                         if final_height_check == new_height:
-                            break # وصلنا للنهاية الحقيقية
+                            break 
                             
                     last_height = new_height
+                    scroll_attempts += 1
+            except (TimeoutException, WebDriverException) as scroll_timeout:
+                print(f"   ⚠️ المتصفح تباطأ أثناء النزول (Scroll Timeout). سنتخطى السكرول ونجمع الروابط الحالية لحماية الإسكربت...")
             except Exception as scroll_err:
-                print(f"   ⚠️ مشكلة أثناء النزول في الصفحة (Scroll): {scroll_err}")
+                print(f"   ⚠️ مشكلة عامة أثناء النزول في الصفحة: {scroll_err}")
             
-            # --- استخراج الروابط باستخدام الجافاسكريبت لضمان الدقة والسرعة ---
-            links = driver.execute_script("""
-                var urls = [];
-                var items = document.querySelectorAll('article a, .ProductsGrid a, a[href*="/ar/"]');
-                for (var i = 0; i < items.length; i++) {
-                    urls.push(items[i].href);
-                }
-                return urls;
-            """)
+            # --- استخراج الروابط المتاحة حالياً بالصفحة ---
+            try:
+                links = driver.execute_script("""
+                    var urls = [];
+                    var items = document.querySelectorAll('article a, .ProductsGrid a, a[href*="/ar/"]');
+                    for (var i = 0; i < items.length; i++) {
+                        urls.push(items[i].href);
+                    }
+                    return urls;
+                """)
+            except Exception as js_err:
+                print(f"   ⚠️ فشل استخراج الروابط عبر الجافاسكريبت في هذه الصفحة: {js_err}")
+                links = []
             
             new_links_found = 0
             for p_link in links:
                 if p_link and "rayashop.com" in p_link and "/ar/" in p_link:
-                    # استبعاد الروابط اللي مش منتجات
                     exclude_keywords = ["/brands/", "/categories/", "/cart", "/login", "/contact", "/about"]
                     if any(kw in p_link for kw in exclude_keywords):
                         continue
                         
-                    # تنظيف الرابط من أي متغيرات عشان نمنع التكرار
                     clean_p_link = p_link.split('?')[0]
                     
                     if clean_p_link not in seen_urls_in_category:
@@ -123,7 +130,6 @@ try:
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
             
-            # لو ملحقناش أي روابط جديدة، يبقى القسم ده خلص تماماً
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
@@ -139,11 +145,10 @@ try:
         try:
             driver.get(p_url)
             time.sleep(3)
-        except TimeoutException:
-            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء شديد في التحميل (Timeout).")
+        except (TimeoutException, WebDriverException):
+            print(f"   ⚠️ تجاوزنا المنتج ده بسبب بطء شديد أو خطأ في استجابة الصفحة.")
             continue 
-        except Exception as e:
-            print(f"   ⚠️ تجاوزنا المنتج ده بسبب خطأ غير متوقع.")
+        except Exception:
             continue 
         
         try:
@@ -207,7 +212,7 @@ try:
             for img_idx, img_url in enumerate(image_urls, 1):
                 product_data[f"صورة {img_idx}"] = img_url
                 
-            all_scraped_data.append(product_data)
+                all_scraped_data.append(product_data)
             
         except Exception:
             continue
@@ -232,7 +237,7 @@ try:
         print("\n❌ لم يتم تجميع بيانات، يرجى مراجعة حجم الشاشة الكلي وعناصر الصفحة.")
 
 except Exception as main_error:
-    print(f"❌ حدث خطأ عام: {main_error}")
+    print(f"❌ حدث خطأ عام غير متوقع: {main_error}")
 
 finally:
     driver.quit()
