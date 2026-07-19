@@ -23,7 +23,7 @@ options.page_load_strategy = 'eager'
 
 driver = webdriver.Chrome(options=options)
 
-# زيادة وقت الانتظار الإضافي لفتح الصفحات والسكربتات لـ 120 ثانية منعاً لأي تعليق لقدرات السيرفر
+# وقت كافي جداً لتجنب أي تهنيج في السيرفرات
 driver.set_page_load_timeout(120) 
 driver.set_script_timeout(120)
 
@@ -45,7 +45,6 @@ try:
         href = elem.get_attribute("href")
         name = elem.text.strip()
         if href and name and "/ar/" in href:
-            # تنظيف الرابط الأساسي
             clean_href = href.split('?')[0]
             categories_map[clean_href] = name
 
@@ -59,58 +58,64 @@ try:
         seen_urls_in_category = set()
         
         while True:
-            # استخدام page= للترقيم
-            page_url = f"{cat_url}?page={page_num}"
+            # التعديل الجوهري: استخدام ?p= بدلاً من ?page= لتوافق منصة راية شوب
+            page_url = f"{cat_url}?p={page_num}"
             print(f"   📄 فحص صفحة الروابط رقم ({page_num}) -> {page_url}")
             
             try:
                 driver.get(page_url)
-                time.sleep(5) # انتظار التحميل الأولي
+                time.sleep(5) 
             except (TimeoutException, WebDriverException):
                 print(f"   ⚠️ انتهى وقت الانتظار (Timeout) أثناء فتح صفحة الروابط رقم ({page_num}). سنحاول سحب المتاح حالياً...")
             except Exception as e:
                 print(f"   ⚠️ حدث خطأ غير متوقع أثناء فتح الصفحة: {e}")
                 break 
             
-            # --- حماية وعزل عملية السكرول تماماً لتجنب انهيار الـ Renderer ---
-            print("   ⬇️ جاري النزول لآخر الصفحة لضمان ظهور كافة المنتجات...")
+            print("   ⬇️ جاري النزول لآخر الصفحة لضمان ظهور كافة المنتجات (التعامل مع الـ Pagination)...")
             try:
                 last_height = driver.execute_script("return document.body.scrollHeight")
                 scroll_attempts = 0
-                max_scroll_attempts = 30 # حد أقصى للسكرول لمنع تهنيج المتصفح في الصفحات اللانهائية
+                max_scroll_attempts = 100 # رقم ضخم لضمان المرور على كل المنتجات في حالة الـ Infinite Scroll
                 
                 while scroll_attempts < max_scroll_attempts:
-                    driver.execute_script("window.scrollBy(0, 600);")
-                    time.sleep(1.5)
+                    # النزول والضغط على أي زرار "عرض المزيد" لو كان موجود
+                    driver.execute_script("""
+                        window.scrollBy(0, 800);
+                        var loadBtns = document.querySelectorAll('.action.more, .load-more, button[class*="load"]');
+                        loadBtns.forEach(btn => {
+                            if(btn && btn.offsetParent !== null) { btn.click(); }
+                        });
+                    """)
+                    time.sleep(1.8)
                     
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     current_scroll_position = driver.execute_script("return window.innerHeight + window.scrollY")
                     
-                    if current_scroll_position >= new_height - 150:
-                        time.sleep(3)
+                    if current_scroll_position >= new_height - 200:
+                        time.sleep(4) # انتظار أطول قليلاً لاحتمالية تحميل أجاكس متأخر
                         final_height_check = driver.execute_script("return document.body.scrollHeight")
                         if final_height_check == new_height:
                             break 
                             
                     last_height = new_height
                     scroll_attempts += 1
-            except (TimeoutException, WebDriverException) as scroll_timeout:
-                print(f"   ⚠️ المتصفح تباطأ أثناء النزول (Scroll Timeout). سنتخطى السكرول ونجمع الروابط الحالية لحماية الإسكربت...")
+            except (TimeoutException, WebDriverException):
+                print(f"   ⚠️ المتصفح تباطأ أثناء النزول. سنتخطى السكرول ونجمع الروابط الحالية لحماية الإسكربت...")
             except Exception as scroll_err:
                 print(f"   ⚠️ مشكلة عامة أثناء النزول في الصفحة: {scroll_err}")
             
-            # --- استخراج الروابط المتاحة حالياً بالصفحة ---
+            # استخراج الروابط
             try:
                 links = driver.execute_script("""
                     var urls = [];
-                    var items = document.querySelectorAll('article a, .ProductsGrid a, a[href*="/ar/"]');
+                    var items = document.querySelectorAll('article a, .ProductsGrid a, .product-item a, a[href*="/ar/"]');
                     for (var i = 0; i < items.length; i++) {
                         urls.push(items[i].href);
                     }
                     return urls;
                 """)
             except Exception as js_err:
-                print(f"   ⚠️ فشل استخراج الروابط عبر الجافاسكريبت في هذه الصفحة: {js_err}")
+                print(f"   ⚠️ فشل استخراج الروابط في هذه الصفحة: {js_err}")
                 links = []
             
             new_links_found = 0
@@ -129,6 +134,7 @@ try:
             
             print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد من هذه الصفحة.")
             
+            # لو ملقاش منتجات جديدة، يبقى القسم خلص فعلياً ومفيش صفحات تانية
             if new_links_found == 0:
                 print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
                 break
@@ -175,7 +181,7 @@ try:
                 brand_name = "N/A"
                 
             try:
-                price_element = driver.find_element(By.CSS_SELECTOR, "span.text-primary-500.text-xl")
+                price_element = driver.find_element(By.CSS_SELECTOR, "span.text-primary-500.text-xl, .price, [data-price-type='finalPrice']")
                 exact_price = price_element.text.replace("جنيه", "").replace("EGP", "").strip()
             except:
                 exact_price = "N/A"
@@ -211,7 +217,7 @@ try:
             for img_idx, img_url in enumerate(image_urls, 1):
                 product_data[f"صورة {img_idx}"] = img_url
                 
-            # تعديل الإزاحة: إدخال المنتج في القائمة العامة بعد انتهاء جلب كل الصور الخاصة به (خارج الـ loop)
+            # إدراج المنتج مرة واحدة فقط
             all_scraped_data.append(product_data)
             
         except Exception:
