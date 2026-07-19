@@ -68,7 +68,6 @@ try:
                 time.sleep(5) # انتظار التحميل الأولي
             except (TimeoutException, WebDriverException):
                 print(f"   ⚠️ انتهى وقت الانتظار (Timeout) أثناء فتح صفحة الروابط رقم ({page_num}). سنحاول سحب المتاح حالياً...")
-                # لا نخرج بـ break مباشرة، بل نترك الفرصة لمحاولة قراءة الروابط الموجودة بالفعل في الـ DOM
             except Exception as e:
                 print(f"   ⚠️ حدث خطأ غير متوقع أثناء فتح الصفحة: {e}")
                 break 
@@ -212,7 +211,8 @@ try:
             for img_idx, img_url in enumerate(image_urls, 1):
                 product_data[f"صورة {img_idx}"] = img_url
                 
-                all_scraped_data.append(product_data)
+            # تعديل الإزاحة: إدخال المنتج في القائمة العامة بعد انتهاء جلب كل الصور الخاصة به (خارج الـ loop)
+            all_scraped_data.append(product_data)
             
         except Exception:
             continue
