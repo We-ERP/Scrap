@@ -164,13 +164,13 @@ try:
             product_data = {
                 "كاتيجوري": product_category,
                 "اسم المنتج": product_name,
-                "كود المنتج": "N/A", # تم إزالته مؤقتاً لتجنب أخطاء التقسيم العشوائي للاسم
+                "كود المنتج": "N/A", 
                 "اسم البراند": brand_name,
                 "سعر المنتج": exact_price,
                 "لينك المنتج": p_url
             }
             
-            for img_idx, img_url in enumerate(image_urls[:3], 1): # سحب أول 3 صور فقط لتخفيف الضغط
+            for img_idx, img_url in enumerate(image_urls[:3], 1): 
                 product_data[f"صورة {img_idx}"] = img_url
                 
             all_scraped_data.append(product_data)
