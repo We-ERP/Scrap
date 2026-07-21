@@ -9,31 +9,27 @@ import requests
 # رابط الـ Web App بتاعك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
 
-# قراءة القسم المطلوب من بيئة التشغيل
-TARGET_CATEGORY_KEY = os.getenv("TARGET_CATEGORY", "all")
-
-print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي المحسن لمنع استهلاك الرامات...")
+print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي المحسن...")
 options = Options()
 options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 options.add_argument("--disable-gpu")
-options.add_argument("--disable-software-rasterizer")
 options.add_argument("--window-size=1920,1080") 
 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 options.add_argument("--lang=ar-EG")
 options.page_load_strategy = 'eager' 
 
-# 🛑 إيقاف تحميل الصور لمنع انهيار الرامات (Tab Crashed)
+# إيقاف الصور لتوفير الذاكرة والسرعة
 prefs = {"profile.managed_default_content_settings.images": 2}
 options.add_experimental_option("prefs", prefs)
 
 driver = webdriver.Chrome(options=options)
 driver.set_page_load_timeout(120) 
-driver.set_script_timeout(120)
 
 all_scraped_data = []
 
+# الأقسام التلاتة المطلوبة
 TARGET_CATEGORIES = {
     "health": {"url": "https://www.rayashop.com/ar/health-and-beauty", "name": "الصحة والجمال"},
     "small_app": {"url": "https://www.rayashop.com/ar/small-appliances", "name": "أجهزة صغيرة"},
@@ -44,9 +40,6 @@ try:
     product_tasks = []
     
     for cat_key, cat_info in TARGET_CATEGORIES.items():
-        if TARGET_CATEGORY_KEY != "all" and TARGET_CATEGORY_KEY != cat_key:
-            continue
-            
         cat_url = cat_info["url"]
         cat_name = cat_info["name"]
         print(f"\n📂 جاري تجميع روابط المنتجات من [ قسم: {cat_name} ]")
@@ -54,7 +47,7 @@ try:
         seen_urls_in_category = set()
         page_num = 1
         
-        while True:
+        while page_num <= 10:  # حد أقصى آمن لصفحات كل قسم
             page_url = f"{cat_url}?p={page_num}"
             print(f"   📄 فحص الصفحة رقم ({page_num}) -> {page_url}")
             
@@ -62,39 +55,25 @@ try:
                 driver.get(page_url)
                 time.sleep(3) 
             except Exception as e:
-                print(f"   ⚠️ حدث خطأ أثناء فتح الصفحة: {e}")
+                print(f"   ⚠️ خطأ في فتح الصفحة: {e}")
                 break 
             
-            print("   ⬇️ جاري النزول لآخر الصفحة والضغط على (تحميل المزيد)...")
+            # محاكاة التنزيل لأسفل الصفحة لتحميل كل المنتجات الكسلانة (Lazy load)
             last_height = driver.execute_script("return document.body.scrollHeight")
-            
-            scroll_attempts = 0
-            while scroll_attempts < 15: # حماية إضافية ضد الـ loops اللانهائية
+            for _ in range(5):
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1.5)
-                
-                try:
-                    load_more_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'تحميل المزيد') or contains(@class, 'load-more')]")
-                    if load_more_btn.is_displayed():
-                        driver.execute_script("arguments[0].click();", load_more_btn)
-                        print("      🔘 تم الضغط على زرار تحميل المزيد...")
-                        time.sleep(3)
-                except:
-                    pass
-                
+                time.sleep(1)
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
-                    time.sleep(2)
-                    if driver.execute_script("return document.body.scrollHeight") == last_height:
-                        break
+                    break
                 last_height = new_height
-                scroll_attempts += 1
             
+            # استخراج الروابط بدقة من عناصر المنتجات
             links = driver.execute_script("""
                 var urls = [];
-                var items = document.querySelectorAll('.product-item-info a.product-item-link, .ProductsGrid a');
+                var items = document.querySelectorAll('.product-item-info a.product-item-link, .product-item a.product-item-photo, .products.list.items a');
                 for (var i = 0; i < items.length; i++) {
-                    urls.push(items[i].href);
+                    if (items[i].href) urls.push(items[i].href);
                 }
                 return urls;
             """)
@@ -108,48 +87,64 @@ try:
                         product_tasks.append((clean_p_link, cat_name))
                         new_links_found += 1
             
-            print(f"   ✨ تم لقط {new_links_found} رابط منتج جديد.")
+            print(f"   ✨ تم لقط {new_links_found} رابط جديد في الصفحة {page_num}.")
             
+            # لو الصفحة مفيهاش منتجات جديدة، نوقف وننقل للقسم اللي بعده
             if new_links_found == 0:
-                print(f"   ⏹️ تم جمع كافة الروابط المتاحة لقسم ({cat_name}).")
+                print(f"   ⏹️ انتهت صفحات قسم ({cat_name}).")
                 break
             page_num += 1
 
-    print(f"\n🔥 إجمالي الروابط التي تم جمعها: {len(product_tasks)} منتج.")
+    print(f"\n🔥 إجمالي الروابط المجتمعة لكل الأقسام: {len(product_tasks)} منتج.")
 
-    # --- الدخول لصفحة كل منتج وسحب البيانات ---
+    # --- سحب تفاصيل كل منتج ---
     for index, (p_url, fallback_cat) in enumerate(product_tasks, 1):
-        print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
+        print(f"   🔄 قشط المنتج ({index}/{len(product_tasks)}) -> {p_url}")
         try:
             driver.get(p_url)
-            time.sleep(1.5)
+            time.sleep(1.2)
         except:
             continue 
         
         try:
+            # اسم المنتج
             try:
                 product_name = driver.find_element(By.TAG_NAME, "h1").text.strip()
             except:
                 product_name = "N/A"
                 
+            # البراند
             try:
                 brand_element = driver.find_element(By.CSS_SELECTOR, ".product-brand-name, a[href*='/ar/brands/']")
                 brand_name = brand_element.text.strip()
             except:
                 brand_name = "N/A"
                 
-            try:
-                price_element = driver.find_element(By.CSS_SELECTOR, "[data-price-type='finalPrice'] .price")
-                exact_price = price_element.text.replace("جنيه", "").replace("EGP", "").strip()
-            except:
-                exact_price = "N/A"
+            # السعر المعدل بدقة لتجنب النقص
+            exact_price = "N/A"
+            price_selectors = [
+                ".product-info-price .price", 
+                "[data-price-type='finalPrice'] .price", 
+                ".special-price .price", 
+                ".price-box .price"
+            ]
+            for selector in price_selectors:
+                try:
+                    price_element = driver.find_element(By.CSS_SELECTOR, selector)
+                    val = price_element.text.replace("جنيه", "").replace("EGP", "").replace(",", "").strip()
+                    if val:
+                        exact_price = val
+                        break
+                except:
+                    continue
                 
+            # الكاتيجوري التفصيلي من المسار
             product_category = fallback_cat
             try:
-                breadcrumbs = driver.find_elements(By.CSS_SELECTOR, ".breadcrumbs li a")
-                cat_names = [c.text.strip() for c in breadcrumbs if c.text.strip() and c.text.strip() not in ["الرئيسية", "Home"]]
-                if cat_names:
-                    product_category = " > ".join(cat_names)
+                breadcrumbs = driver.find_elements(By.CSS_SELECTOR, ".breadcrumbs li")
+                cat_names = [c.text.strip() for c in breadcrumbs if c.text.strip() and c.text.strip() not in ["الرئيسية", "Home", "/"]]
+                if len(cat_names) > 1:
+                    product_category = " > ".join(cat_names[1:-1]) if len(cat_names) > 2 else cat_names[0]
             except:
                 pass
 
@@ -166,16 +161,16 @@ try:
         except Exception:
             continue
 
-    # --- إرسال البيانات لجوجل شيت ---
+    # --- إرسال الداتا لجوجل شيت دفعة واحدة ---
     if all_scraped_data:
         df = pd.DataFrame(all_scraped_data)
         cleaned_data = df.fillna("").to_dict(orient="records")
         payload = {"products": cleaned_data}
         try:
             response = requests.post(GOOGLE_WEBAPP_URL, json=payload, timeout=180)
-            print("✅ تم تحديث شيت جوجل السحابي بنجاح مذهل!")
+            print("✅ تم رفع كافة البيانات وتحديث الشيت بنجاح تام!")
         except Exception as http_err:
-            print(f"❌ خطأ الاتصال: {http_err}")
+            print(f"❌ خطأ في الإرسال: {http_err}")
 
 except Exception as main_error:
     print(f"❌ خطأ عام: {main_error}")
