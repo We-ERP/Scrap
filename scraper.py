@@ -5,23 +5,28 @@ from selenium.webdriver.common.by import By
 import pandas as pd
 import time
 import requests
-from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # رابط الـ Web App بتاعك
 GOOGLE_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzKWdWi9qc4e7I5xF8tvDciSZ4Fh1DygtOvRocRbwaFi19AJ3wXMKekrrDcSE4w2wCL/exec"
 
-# قراءة القسم المطلوب من بيئة التشغيل (عشان نربطه بواجهة الـ HTML)
+# قراءة القسم المطلوب من بيئة التشغيل
 TARGET_CATEGORY_KEY = os.getenv("TARGET_CATEGORY", "all")
 
-print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي الشامل...")
+print("🚀 جاري تشغيل متصفح Chrome في الوضع الخفي المحسن لمنع استهلاك الرامات...")
 options = Options()
 options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-gpu")
+options.add_argument("--disable-software-rasterizer")
 options.add_argument("--window-size=1920,1080") 
 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 options.add_argument("--lang=ar-EG")
 options.page_load_strategy = 'eager' 
+
+# 🛑 إيقاف تحميل الصور لمنع انهيار الرامات (Tab Crashed)
+prefs = {"profile.managed_default_content_settings.images": 2}
+options.add_experimental_option("prefs", prefs)
 
 driver = webdriver.Chrome(options=options)
 driver.set_page_load_timeout(120) 
@@ -29,7 +34,6 @@ driver.set_script_timeout(120)
 
 all_scraped_data = []
 
-# الأقسام المحددة اللي طلبتها
 TARGET_CATEGORIES = {
     "health": {"url": "https://www.rayashop.com/ar/health-and-beauty", "name": "الصحة والجمال"},
     "small_app": {"url": "https://www.rayashop.com/ar/small-appliances", "name": "أجهزة صغيرة"},
@@ -41,7 +45,7 @@ try:
     
     for cat_key, cat_info in TARGET_CATEGORIES.items():
         if TARGET_CATEGORY_KEY != "all" and TARGET_CATEGORY_KEY != cat_key:
-            continue # لو مختار قسم معين من الواجهة، هيتجاهل الباقي
+            continue
             
         cat_url = cat_info["url"]
         cat_name = cat_info["name"]
@@ -56,7 +60,7 @@ try:
             
             try:
                 driver.get(page_url)
-                time.sleep(5) 
+                time.sleep(3) 
             except Exception as e:
                 print(f"   ⚠️ حدث خطأ أثناء فتح الصفحة: {e}")
                 break 
@@ -64,29 +68,28 @@ try:
             print("   ⬇️ جاري النزول لآخر الصفحة والضغط على (تحميل المزيد)...")
             last_height = driver.execute_script("return document.body.scrollHeight")
             
-            while True:
-                # سكرول لآخر الصفحة
+            scroll_attempts = 0
+            while scroll_attempts < 15: # حماية إضافية ضد الـ loops اللانهائية
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+                time.sleep(1.5)
                 
-                # البحث عن زرار تحميل المزيد والضغط عليه
                 try:
                     load_more_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'تحميل المزيد') or contains(@class, 'load-more')]")
                     if load_more_btn.is_displayed():
                         driver.execute_script("arguments[0].click();", load_more_btn)
                         print("      🔘 تم الضغط على زرار تحميل المزيد...")
-                        time.sleep(4) # انتظار تحميل المنتجات الجديدة
+                        time.sleep(3)
                 except:
-                    pass # الزرار مش موجود أو اختفى
+                    pass
                 
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
-                    time.sleep(3) # تأكيد أخير
+                    time.sleep(2)
                     if driver.execute_script("return document.body.scrollHeight") == last_height:
-                        break # وصلنا للنهاية الفعلية
+                        break
                 last_height = new_height
+                scroll_attempts += 1
             
-            # استخراج الروابط بشكل دقيق
             links = driver.execute_script("""
                 var urls = [];
                 var items = document.querySelectorAll('.product-item-info a.product-item-link, .ProductsGrid a');
@@ -119,7 +122,7 @@ try:
         print(f"   🔄 جاري قشط المنتج رقم ({index}/{len(product_tasks)}) -> {p_url}")
         try:
             driver.get(p_url)
-            time.sleep(2)
+            time.sleep(1.5)
         except:
             continue 
         
@@ -141,7 +144,6 @@ try:
             except:
                 exact_price = "N/A"
                 
-            # التعديل الجوهري لمنع تداخل الداتا في حقل الكاتيجوري
             product_category = fallback_cat
             try:
                 breadcrumbs = driver.find_elements(By.CSS_SELECTOR, ".breadcrumbs li a")
@@ -151,28 +153,15 @@ try:
             except:
                 pass
 
-            image_urls = []
-            try:
-                img_tags = driver.find_elements(By.CSS_SELECTOR, ".product.media img, .gallery-placeholder img")
-                for img in img_tags:
-                    src = img.get_attribute("src")
-                    if src and src not in image_urls:
-                        image_urls.append(src)
-            except:
-                pass
-
             product_data = {
                 "كاتيجوري": product_category,
                 "اسم المنتج": product_name,
-                "كود المنتج": "N/A", 
+                "كود المنتج": "N/A",
                 "اسم البراند": brand_name,
                 "سعر المنتج": exact_price,
                 "لينك المنتج": p_url
             }
             
-            for img_idx, img_url in enumerate(image_urls[:3], 1): 
-                product_data[f"صورة {img_idx}"] = img_url
-                
             all_scraped_data.append(product_data)
         except Exception:
             continue
